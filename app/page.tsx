@@ -1,201 +1,98 @@
-"use client"
+import Link from "next/link"
+import { Bitcoin, TrendingUp, Zap, Shield } from "lucide-react"
 
-import { useEffect, useState, useCallback, useRef } from "react"
-import { binanceWS, type PriceTick } from "@/lib/binance"
-import { createBet, checkBetWin, isBetExpired, type Bet } from "@/lib/betting"
-import { AssetPill } from "@/components/asset-pill"
-import { BalancePill } from "@/components/balance-pill"
-import { StakeSelector } from "@/components/stake-selector"
-import { UnifiedChart } from "@/components/unified-chart"
-import { Toast } from "@/components/toast"
-import { TileScaler } from "@/components/tile-scaler"
-
-const STAKES = [1, 5, 10]
-const INITIAL_BALANCE = 68.82
-const ROWS = 14
-const COLS = 12
-const TIME_STEP_MS = 5000 // 5 seconds per column
-const HISTORY_WINDOW_MS = 60000 // 60 seconds of historical data
-const MAX_HISTORY = 300
-
-export default function TapTrading() {
-  const [isConnected, setIsConnected] = useState(false)
-  const [currentPrice, setCurrentPrice] = useState<number | null>(null)
-  const [priceHistory, setPriceHistory] = useState<PriceTick[]>([])
-  const [balance, setBalance] = useState(INITIAL_BALANCE)
-  const [stake, setStake] = useState(5)
-  const [bets, setBets] = useState<Bet[]>([])
-  const [toast, setToast] = useState<{ message: string; type: "error" | "success" | "info" } | null>(null)
-  const [tileScale, setTileScale] = useState(0.2)
-
-  const betsRef = useRef(bets)
-  betsRef.current = bets
-
-  const priceStep = currentPrice ? currentPrice * (tileScale / 100) : 100
-
-  useEffect(() => {
-    const unsubPrice = binanceWS.onPrice((tick) => {
-      setCurrentPrice(tick.price)
-      setPriceHistory((prev) => {
-        const updated = [...prev, tick]
-        const cutoff = Date.now() - HISTORY_WINDOW_MS - 5000
-        const filtered = updated.filter((t) => t.timestamp > cutoff)
-        if (filtered.length > MAX_HISTORY) {
-          return filtered.slice(-MAX_HISTORY)
-        }
-        return filtered
-      })
-
-      const now = Date.now()
-      setBets((prevBets) => {
-        let balanceChange = 0
-        const updatedBets = prevBets.map((bet) => {
-          if (bet.status !== "open") return bet
-
-          if (checkBetWin(bet, tick.price, now)) {
-            const winnings = bet.stake * bet.multiplier
-            balanceChange += winnings
-            setToast({ message: `Won $${winnings.toFixed(2)}!`, type: "success" })
-            return { ...bet, status: "won" as const, hitAt: now }
-          }
-
-          if (isBetExpired(bet)) {
-            return { ...bet, status: "lost" as const }
-          }
-
-          return bet
-        })
-
-        if (balanceChange > 0) {
-          setBalance((prev) => prev + balanceChange)
-        }
-
-        return updatedBets
-      })
-    })
-
-    const unsubConnection = binanceWS.onConnection(setIsConnected)
-
-    binanceWS.connect()
-
-    return () => {
-      unsubPrice()
-      unsubConnection()
-      binanceWS.disconnect()
-    }
-  }, [])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setBets((prevBets) =>
-        prevBets.map((bet) => {
-          if (bet.status === "open" && isBetExpired(bet)) {
-            return { ...bet, status: "lost" as const }
-          }
-          return bet
-        }),
-      )
-    }, 500)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  useEffect(() => {
-    const interval = setInterval(() => {
-      const now = Date.now()
-      setBets((prevBets) =>
-        prevBets.filter((bet) => {
-          if (bet.status === "open") return true
-          return now - bet.expiresAt < 30000
-        }),
-      )
-    }, 5000)
-
-    return () => clearInterval(interval)
-  }, [])
-
-  const handleCellClick = useCallback(
-    (
-      row: number,
-      col: number,
-      priceMin: number,
-      priceMax: number,
-      expiresAt: number,
-      betStartTime: number,
-      multiplier: number,
-      absolutePrice: number,
-    ) => {
-      if (balance < stake) {
-        setToast({ message: "Insufficient balance", type: "error" })
-        return
-      }
-
-      const existingBet = betsRef.current.find(
-        (b) =>
-          b.betStartTime === betStartTime &&
-          Math.abs((b.priceMin + b.priceMax) / 2 - absolutePrice) < priceStep / 2 &&
-          b.status === "open",
-      )
-      if (existingBet) {
-        setToast({ message: "Bet already placed here", type: "info" })
-        return
-      }
-
-      const bet = createBet(stake, multiplier, priceMin, priceMax, expiresAt, betStartTime, row, col)
-      setBalance((prev) => prev - stake)
-      setBets((prev) => [...prev, bet])
-    },
-    [balance, stake, priceStep],
-  )
-
+export default function LandingPage() {
   return (
-    <div className="fixed inset-0 overflow-hidden gradient-bg dotted-bg">
-      <div className="absolute top-4 left-4 z-20">
-        <AssetPill price={currentPrice} isConnected={isConnected} />
-      </div>
-
-      <div className="absolute bottom-4 left-4 z-20">
-        <BalancePill balance={balance} />
-      </div>
-
-      <div className="absolute bottom-4 right-4 z-20">
-        <StakeSelector stake={stake} stakes={STAKES} onStakeChange={setStake} />
-      </div>
-
-      <div className="absolute top-4 left-1/2 -translate-x-1/2 z-20">
-        <TileScaler scale={tileScale} onScaleChange={setTileScale} />
-      </div>
-
-      <div className="absolute top-4 right-4 z-20">
-        <div
-          className={`flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-medium ${
-            isConnected ? "bg-emerald-500/20 text-emerald-400" : "bg-red-500/20 text-red-400"
-          }`}
-        >
-          <div className={`w-2 h-2 rounded-full ${isConnected ? "bg-emerald-400 animate-pulse" : "bg-red-400"}`} />
-          {isConnected ? "Live" : "Connecting..."}
+    <div className="min-h-screen gradient-bg dotted-bg flex flex-col">
+      {/* Header */}
+      <header className="w-full px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 rounded-full bg-gradient-to-br from-fuchsia-500 to-purple-600 flex items-center justify-center">
+            <Bitcoin className="w-5 h-5 text-white" />
+          </div>
+          <span className="font-semibold text-lg text-foreground">LitTap</span>
         </div>
-      </div>
+        <nav className="hidden md:flex items-center gap-6 text-sm text-muted-foreground">
+          <a href="#how-it-works" className="hover:text-foreground transition-colors">
+            How it works
+          </a>
+          <a href="#features" className="hover:text-foreground transition-colors">
+            Features
+          </a>
+        </nav>
+      </header>
 
-      <div className="h-full w-full pt-16 pb-16 px-4">
-        <UnifiedChart
-          priceHistory={priceHistory}
-          currentPrice={currentPrice}
-          rows={ROWS}
-          cols={COLS}
-          priceStep={priceStep}
-          timeStepMs={TIME_STEP_MS}
-          historyWindowMs={HISTORY_WINDOW_MS}
-          bets={bets}
-          onCellClick={handleCellClick}
-        />
-      </div>
+      {/* Hero Section */}
+      <main className="flex-1 flex flex-col items-center justify-center px-6 text-center">
+        <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-fuchsia-500/10 border border-fuchsia-500/20 text-fuchsia-400 text-xs font-medium mb-6">
+          <span className="w-2 h-2 rounded-full bg-fuchsia-400 animate-pulse" />
+          Live BTC Price Feed
+        </div>
 
-      {toast && <Toast message={toast.message} type={toast.type} onClose={() => setToast(null)} />}
+        <h1 className="text-4xl md:text-6xl lg:text-7xl font-bold text-foreground max-w-4xl leading-tight text-balance">
+          Predict Bitcoin.
+          <br />
+          <span className="bg-gradient-to-r from-fuchsia-400 via-purple-400 to-pink-400 bg-clip-text text-transparent">
+            Tap to Win.
+          </span>
+        </h1>
 
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 text-[10px] text-muted-foreground/50 z-10">
-        Demo simulation only • No real money
-      </div>
+        <p className="mt-6 text-lg md:text-xl text-muted-foreground max-w-2xl text-pretty">
+          The fastest way to trade BTC price movements. Pick a price range, choose your timeframe, and tap to place your
+          bet.
+        </p>
+
+        <Link
+          href="/trade"
+          className="mt-10 group relative inline-flex items-center gap-3 px-8 py-4 rounded-full bg-gradient-to-r from-fuchsia-600 to-purple-600 text-white font-semibold text-lg shadow-lg shadow-fuchsia-500/25 hover:shadow-fuchsia-500/40 hover:scale-105 transition-all duration-300"
+        >
+          <Zap className="w-5 h-5" />
+          Start Tapping
+          <span className="absolute inset-0 rounded-full bg-gradient-to-r from-fuchsia-400 to-purple-400 opacity-0 group-hover:opacity-20 transition-opacity" />
+        </Link>
+
+        <p className="mt-4 text-xs text-muted-foreground/60">Demo simulation only • No real money</p>
+      </main>
+
+      {/* Features Section */}
+      <section id="features" className="w-full max-w-5xl mx-auto px-6 pb-20">
+        <div className="grid md:grid-cols-3 gap-6">
+          <div className="p-6 rounded-2xl bg-card/50 border border-border/50 backdrop-blur-sm">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/10 flex items-center justify-center mb-4">
+              <TrendingUp className="w-5 h-5 text-emerald-400" />
+            </div>
+            <h3 className="font-semibold text-foreground mb-2">Real-Time Data</h3>
+            <p className="text-sm text-muted-foreground">
+              Live BTC/USDT price feed from Binance WebSocket with instant updates.
+            </p>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-card/50 border border-border/50 backdrop-blur-sm">
+            <div className="w-10 h-10 rounded-xl bg-fuchsia-500/10 flex items-center justify-center mb-4">
+              <Zap className="w-5 h-5 text-fuchsia-400" />
+            </div>
+            <h3 className="font-semibold text-foreground mb-2">Instant Bets</h3>
+            <p className="text-sm text-muted-foreground">
+              Tap any grid tile to place a bet. Win when price hits your range.
+            </p>
+          </div>
+
+          <div className="p-6 rounded-2xl bg-card/50 border border-border/50 backdrop-blur-sm">
+            <div className="w-10 h-10 rounded-xl bg-purple-500/10 flex items-center justify-center mb-4">
+              <Shield className="w-5 h-5 text-purple-400" />
+            </div>
+            <h3 className="font-semibold text-foreground mb-2">Risk-Free Demo</h3>
+            <p className="text-sm text-muted-foreground">
+              Practice with virtual balance. No real money, pure learning.
+            </p>
+          </div>
+        </div>
+      </section>
+
+      {/* Footer */}
+      <footer className="w-full px-6 py-6 border-t border-border/50 text-center text-xs text-muted-foreground/60">
+        LitTap Demo • Built for educational purposes only
+      </footer>
     </div>
   )
 }
