@@ -18,7 +18,7 @@ const TIME_STEP_MS = 5000 // 5 seconds per column
 const HISTORY_WINDOW_MS = 60000 // 60 seconds of historical data
 const MAX_HISTORY = 300
 
-export default function TradePage() {
+export default function TapTrading() {
   const [isConnected, setIsConnected] = useState(false)
   const [currentPrice, setCurrentPrice] = useState<number | null>(null)
   const [priceHistory, setPriceHistory] = useState<PriceTick[]>([])
