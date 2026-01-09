@@ -23,10 +23,16 @@ class BinanceWebSocket {
   private priceCallbacks: Set<PriceCallback> = new Set()
   private connectionCallbacks: Set<ConnectionCallback> = new Set()
   private reconnectAttempts = 0
-  private maxReconnectAttempts = 10
+  private maxReconnectAttempts = 15
   private baseDelay = 1000
   private isConnecting = false
   private shouldReconnect = true
+  private endpoints = [
+    "wss://stream.binance.com:9443/ws/btcusdt@trade",
+    "wss://stream.binance.com:443/ws/btcusdt@trade",
+    "wss://fstream.binance.com/ws/btcusdt@trade",
+  ]
+  private currentEndpointIndex = 0
 
   connect() {
     if (typeof window === "undefined") return
@@ -38,12 +44,24 @@ class BinanceWebSocket {
     this.isConnecting = true
     this.shouldReconnect = true
 
+    const endpoint = this.endpoints[this.currentEndpointIndex]
+    console.log("[v0] Connecting to Binance:", endpoint)
+
     try {
-      this.ws = new WebSocket("wss://stream.binance.com:9443/ws/btcusdt@trade")
+      this.ws = new WebSocket(endpoint)
+
+      const connectionTimeout = setTimeout(() => {
+        if (this.ws?.readyState !== WebSocket.OPEN) {
+          console.log("[v0] Connection timeout, trying next endpoint")
+          this.ws?.close()
+        }
+      }, 10000)
 
       this.ws.onopen = () => {
+        clearTimeout(connectionTimeout)
         this.isConnecting = false
         this.reconnectAttempts = 0
+        console.log("[v0] Connected to Binance successfully")
         this.notifyConnection(true)
       }
 
@@ -63,18 +81,23 @@ class BinanceWebSocket {
       }
 
       this.ws.onclose = () => {
+        clearTimeout(connectionTimeout)
         this.isConnecting = false
         this.notifyConnection(false)
+        console.log("[v0] WebSocket closed")
         if (this.shouldReconnect) {
           this.scheduleReconnect()
         }
       }
 
-      this.ws.onerror = () => {
+      this.ws.onerror = (error) => {
+        clearTimeout(connectionTimeout)
         this.isConnecting = false
+        console.log("[v0] WebSocket error:", error)
         this.ws?.close()
       }
-    } catch {
+    } catch (err) {
+      console.log("[v0] Connection error:", err)
       this.isConnecting = false
       this.scheduleReconnect()
     }
@@ -82,11 +105,16 @@ class BinanceWebSocket {
 
   private scheduleReconnect() {
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.log("[v0] Max reconnect attempts reached")
       return
     }
 
-    const delay = this.baseDelay * Math.pow(2, this.reconnectAttempts)
+    this.currentEndpointIndex = (this.currentEndpointIndex + 1) % this.endpoints.length
+
+    const delay = Math.min(this.baseDelay * Math.pow(1.5, this.reconnectAttempts), 30000)
     this.reconnectAttempts++
+
+    console.log(`[v0] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`)
 
     setTimeout(() => {
       if (this.shouldReconnect) {
